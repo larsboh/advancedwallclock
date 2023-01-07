@@ -58,21 +58,19 @@ Mode "3" - System test
 
 
 "C" - color setting
-
-   more                   less
    
-"1" ++ red (minute digits)   -- "4"
+"1" < +   red (minute digits)   - > "4"
 
-"2" ++ green (minute digits) -- "5"
+"2" < +   green (minute digits) - > "5"
 
-"3" ++ blue (minute digits)  -- "6"
+"3" < +   blue (minute digits)  - > "6"
 
 
-"7" ++ red (hour digits) -- "*"
+"7" < +   red (hour digits)     - > "*"
 
-"8" ++ green (hour digits) -- "0"
-
-"9" ++ blue (hour digits) -- "#"
+"8" < +   green (hour digits)   - > "0"
+ 
+"9" < +   blue (hour digits)    - > "#"
 
 
 
