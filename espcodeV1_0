@@ -1,0 +1,772 @@
+//Giant Seven Segment Wall Clock from DIY machines
+//Version 1.0 by larsboh
+
+#include <Adafruit_NeoPixel.h>
+#include <WiFi.h>
+#include <Wire.h>
+#include <Keypad.h>
+#include <DS3231.h>
+
+#include "time.h"
+#ifdef __AVR__
+#endif
+
+//Connection-Pins between ESP32 Mini and NeoPixels
+#define LEDCLOCK_PIN        17
+#define LEDDOWNLIGHT_PIN    16
+
+//Number of attached NeoPixels
+#define LEDCLOCK_COUNT      252   //4 digits à 7 segments à 9 LEDs
+#define LEDDOWNLIGHT_COUNT  14
+
+//wifi settings
+const char* ssid       = "YOUR SSID";
+const char* password   = "YOUR PASSWORD";
+
+// default-color of the numbers (0xRRGGBB)
+uint32_t clockMinuteColour = 0x803010;
+uint32_t clockHourColour = 0x802000;
+
+const byte ROWS = 4; //four rows
+const byte COLS = 4; //four columns
+//define the cymbols on the buttons of the keypads
+char hexaKeys[ROWS][COLS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+byte rowPins[ROWS] = {32, 33, 25, 26}; //connect to the row pinouts of the keypad (Digital In/Out ports!)
+byte colPins[COLS] = {27, 14, 12, 13}; //connect to the column pinouts of the keypad (Digital In/Out ports!)
+
+//initialize an instance of class NewKeypad
+Keypad customKeypad = Keypad( makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+unsigned char clockmode = 0;              //default clockmode
+unsigned char Brightness1 = 100;         //default brightness (seven segment display)
+unsigned char Brightness2 = 150;         //default brightness (box downlighter)
+const char* ntpServer = "pool.ntp.org";   //default time-server
+const long  gmtOffset_sec = 3600;         //time zone
+const int   daylightOffset_sec = 3600;
+
+bool timer = 0;
+
+DS3231 clock_;
+RTCDateTime dt;
+
+Adafruit_NeoPixel stripClock(LEDCLOCK_COUNT, LEDCLOCK_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel stripDownlighter(LEDDOWNLIGHT_COUNT, LEDDOWNLIGHT_PIN, NEO_GRB + NEO_KHZ800);
+
+// -----------------------------------------------------------------------------------------
+
+void digitZero(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 27);
+  stripClock.fill(colour, (36 + offset), 27);
+}
+
+void digitOne(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 9);
+  stripClock.fill(colour, (36 + offset), 9);
+}
+
+void digitTwo(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 18);
+  stripClock.fill(colour, (27 + offset), 9);
+  stripClock.fill(colour, (45 + offset), 18);
+}
+
+void digitThree(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 18);
+  stripClock.fill(colour, (27 + offset), 27);
+}
+
+void digitFour(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 9);
+  stripClock.fill(colour, (18 + offset), 27);
+}
+
+void digitFive(int offset, uint32_t colour) {
+  stripClock.fill(colour, (9 + offset), 45);
+}
+
+void digitSix(int offset, uint32_t colour) {
+  stripClock.fill(colour, (9 + offset), 54);
+}
+
+void digitSeven(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 18);
+  stripClock.fill(colour, (36 + offset), 9);
+}
+
+void digitEight(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 63);
+}
+
+void digitNine(int offset, uint32_t colour) {
+  stripClock.fill(colour, (0 + offset), 45);
+  stripClock.fill(colour, (45 + offset), 9);
+}
+
+void digitR(int offset, uint32_t colour) {
+  stripClock.fill(colour, (27 + offset), 9);
+  stripClock.fill(colour, (54 + offset), 9);
+}
+
+void digitB(int offset, uint32_t colour) {
+  stripClock.fill(colour, (18 + offset), 45);
+}
+
+void digitF(int offset, uint32_t colour) {
+  stripClock.fill(colour, (9 + offset), 27);
+  stripClock.fill(colour, (54 + offset), 9);
+}
+
+void digitE(int offset, uint32_t colour) {
+  stripClock.fill(colour, (9 + offset), 27);
+  stripClock.fill(colour, (45 + offset), 18);
+}
+
+void digitT(int offset, uint32_t colour) {
+  stripClock.fill(colour, (18 + offset), 18);
+  stripClock.fill(colour, (45 + offset), 18);
+}
+
+// -----------------------------------------------------------------------------------------
+
+void displayNumber(int digitToDisplay, int offsetBy, uint32_t colourToUse) {
+  switch (digitToDisplay) {
+    case 0:   //0
+      digitZero(offsetBy, colourToUse);
+      break;
+    case 1:   //1
+      digitOne(offsetBy, colourToUse);
+      break;
+    case 2:   //2
+      digitTwo(offsetBy, colourToUse);
+      break;
+    case 3:   //3
+      digitThree(offsetBy, colourToUse);
+      break;
+    case 4:   //4
+      digitFour(offsetBy, colourToUse);
+      break;
+    case 5:   //5
+      digitFive(offsetBy, colourToUse);
+      break;
+    case 6:   //6
+      digitSix(offsetBy, colourToUse);
+      break;
+    case 7:   //7
+      digitSeven(offsetBy, colourToUse);
+      break;
+    case 8:   //8
+      digitEight(offsetBy, colourToUse);
+      break;
+    case 9:   //9
+      digitNine(offsetBy, colourToUse);
+      break;
+    case 10:  //r
+      digitR(offsetBy, colourToUse);
+      break;
+    case 11:  //g
+      digitNine(offsetBy, colourToUse);
+      break;
+    case 12:  //b
+      digitB(offsetBy, colourToUse);
+      break;
+    case 13:  //F
+      digitF(offsetBy, colourToUse);
+      break;
+    case 14:  //E
+      digitE(offsetBy, colourToUse);
+      break;
+    case 15:  //t
+      digitT(offsetBy, colourToUse);
+      break;
+
+    default:
+      break;
+  }
+}
+
+// -----------------------------------------------------------------------------------------
+
+void displayClock() {
+
+  stripClock.clear(); //clear the clock face
+  dt = clock_.getDateTime();
+
+  int firstMinuteDigit = dt.minute % 10; //work out the value of the first digit and then display it
+  displayNumber(firstMinuteDigit, 0, clockMinuteColour);
+  Serial.print("First Minute-Digit: ");
+  Serial.println(firstMinuteDigit);
+
+  int secondMinuteDigit = floor(dt.minute / 10); //work out the value for the second digit and then display it
+  displayNumber(secondMinuteDigit, 63, clockMinuteColour);
+  Serial.print("Second Minute-Digit: ");
+  Serial.println(secondMinuteDigit);
+
+  int firstHourDigit = dt.hour % 10; //work out the value for the third digit and then display it
+  displayNumber(firstHourDigit, 126, clockHourColour);
+  Serial.print("First Hour-Digit: ");
+  Serial.println(firstHourDigit);
+
+  int secondHourDigit = floor(dt.hour / 10); //work out the value for the third digit and then display it
+  displayNumber(secondHourDigit, 189, clockHourColour);
+  Serial.print("Second Hour-Digit: ");
+  Serial.println(secondHourDigit);
+}
+
+// -----------------------------------------------------------------------------------------
+
+void getOnlineTime()
+{
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  Serial.println("\n-----------------------------------");
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  clock_.setDateTime(timeinfo.tm_year, timeinfo.tm_mon, timeinfo.tm_wday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+}
+
+// ---------------------------------------------------------------------------------------
+
+void setup() {
+
+  stripClock.begin();                     // INITIALIZE NeoPixel stripClock object (REQUIRED)
+  stripClock.setBrightness(Brightness1);  // Set inital BRIGHTNESS (max = 255)
+  stripClock.show();                      // Turn OFF all pixels ASAP
+
+  Serial.begin(115200);
+
+  Serial.println("Initialize RTC module");
+  clock_.begin();
+
+  stripDownlighter.begin();           // INITIALIZE NeoPixel stripClock object (REQUIRED)
+  stripDownlighter.show();            // Turn OFF all pixels ASAP
+  stripDownlighter.setBrightness(Brightness2); // Set BRIGHTNESS (max = 255)
+
+  Serial.printf("Connecting to %s ", ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println(" CONNECTED");
+
+  //init and get the time
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  getOnlineTime();
+
+  //disconnect WiFi as it's no longer needed
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
+// -----------------------------------------------------------------------------------------
+
+void loop() {
+  unsigned char wait = dt.second;
+  Serial.print("Mode: ");
+  switch (clockmode) {
+    case 0:
+      Serial.println("Clock");
+      displayClock();
+      stripClock.setBrightness(Brightness1);
+      stripClock.show();
+      break;
+
+    case 1:
+      Serial.println("Timer");
+      stripClock.clear();
+      while (1) {
+        Serial.println("Timer-Setup");
+        unsigned char digit = 0;
+        unsigned char digith2 = 0;
+        unsigned char digith1 = 0;
+        unsigned char digitm2 = 0;
+        unsigned char digitm1 = 0;
+        while (1) {
+          Serial.print("Type Timer-Time: ");
+          Serial.print(digith2);
+          Serial.print(digith1);
+          Serial.print(":");
+          Serial.print(digitm2);
+          Serial.println(digitm1);
+          timer = 0;
+          char customKey = 'A';
+          customKey = customKeypad.getKey();
+          switch (customKey) {
+            case '*':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              Serial.println("Starting the Timer");
+              delay(1000);
+              timer = 1;
+              break;
+
+            case '0':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 0;
+              }
+              else if (digit == 2) {
+                digitm2 = 0;
+              }
+              else if (digit == 1) {
+                digith1 = 0;
+              }
+              else {
+                digith2 = 0;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '1':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 1;
+              }
+              else if (digit == 2) {
+                digitm2 = 1;
+              }
+              else if (digit == 1) {
+                digith1 = 1;
+              }
+              else {
+                digith2 = 1;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '2':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 2;
+              }
+              else if (digit == 2) {
+                digitm2 = 2;
+              }
+              else if (digit == 1) {
+                digith1 = 2;
+              }
+              else {
+                digith2 = 2;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '3':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 3;
+              }
+              else if (digit == 2) {
+                digitm2 = 3;
+              }
+              else if (digit == 1) {
+                digith1 = 3;
+              }
+              else {
+                digith2 = 3;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '4':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 4;
+              }
+              else if (digit == 2) {
+                digitm2 = 4;
+              }
+              else if (digit == 1) {
+                digith1 = 4;
+              }
+              else {
+                digith2 = 4;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '5':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 5;
+              }
+              else if (digit == 2) {
+                digitm2 = 5;
+              }
+              else if (digit == 1) {
+                digith1 = 5;
+              }
+              else {
+                digith2 = 5;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '6':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 6;
+              }
+              else if (digit == 2) {
+                break;
+              }
+              else if (digit == 1) {
+                digith1 = 6;
+              }
+              else {
+                digith2 = 6;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '7':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 7;
+              }
+              else if (digit == 2) {
+                break;
+              }
+              else if (digit == 1) {
+                digith1 = 7;
+              }
+              else {
+                digith2 = 7;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '8':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 8;
+              }
+              else if (digit == 2) {
+                break;
+              }
+              else if (digit == 1) {
+                digith1 = 8;
+              }
+              else {
+                digith2 = 8;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case '9':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              if (digit == 3) {
+                digitm1 = 9;
+              }
+              else if (digit == 2) {
+                break;
+              }
+              else if (digit == 1) {
+                digith1 = 9;
+              }
+              else {
+                digith2 = 9;
+              }
+              (digit > 3) ? (digit = 0) : (digit++);
+              break;
+
+            case 'D':
+              clockmode = 1;
+              return;
+          }
+
+          stripClock.clear();
+          displayNumber(digitm1, 0, clockMinuteColour);
+          displayNumber(digitm2, 63, clockMinuteColour);
+          displayNumber(digith1, 126, clockHourColour);
+          displayNumber(digith2, 189, clockHourColour);
+
+          if (digit == 3) {
+            displayNumber(digitm1, 0, 0x808080);
+          }
+          else if (digit == 2) {
+            displayNumber(digitm2, 63, 0x808080);
+          }
+          else if (digit == 1) {
+            displayNumber(digith1, 126, 0x808080);
+          }
+          else {
+            displayNumber(digith2, 189, 0x808080);
+          }
+          stripClock.show();
+          dt = clock_.getDateTime();
+
+          while (timer == 1) {
+            Serial.print("Timer: ");
+            Serial.print(digith2);
+            Serial.print(digith1);
+            Serial.print(":");
+            Serial.print(digitm2);
+            Serial.println(digitm1);
+            unsigned char wait = dt.second;
+            stripClock.clear();
+            while (digitm1 == 0 && digitm2 == 0 && digith1 == 0 && digith2 == 0) {
+              for (int i = 0; i < 10; i++) {
+                stripClock.clear();
+                stripClock.show();
+                delay(500);
+                stripClock.clear();
+                displayNumber(0, 0, clockMinuteColour);
+                displayNumber(0, 63, clockMinuteColour);
+                displayNumber(0, 126, clockHourColour);
+                displayNumber(0, 189, clockHourColour);
+                stripClock.show();
+                delay(500);
+              }
+              clockmode = 0;
+              return;
+            }
+            if (digitm1 > 0) {
+              digitm1--;
+            }
+            else {
+              if (digitm2 > 0) {
+                digitm2--;
+                digitm1 = 9;
+              }
+              else {
+                if (digith1 > 0) {
+                  digith1--;
+                  digitm2 = 5;
+                  digitm1 = 9;
+                }
+                else {
+                  if (digith2 > 0) {
+                    digith2--;
+                    digith1 = 9;
+                    digitm2 = 5;
+                    digitm1 = 9;
+                  }
+                }
+              }
+            }
+
+            displayNumber(digitm1, 0, clockMinuteColour);
+            displayNumber(digitm2, 63, clockMinuteColour);
+            displayNumber(digith1, 126, clockHourColour);
+            displayNumber(digith2, 189, clockHourColour);
+            stripClock.show();
+
+            while (dt.second == wait) {
+              dt = clock_.getDateTime();
+              char customKey = 'A';
+              customKey = customKeypad.getKey();
+              if (customKey == 'D') {
+                clockmode = 0;
+                return;
+              }
+            }
+          }
+        }
+      }
+      break;
+
+    case 2:
+      Serial.println("System-Check");
+      for (int i = 0; i <= 9; i++) {
+        stripClock.clear();
+        Serial.print("Systemtest: ");
+        Serial.println(i);
+        displayNumber(i % 10, 0, 0x800000);
+        displayNumber(i % 10, 63, 0x800000);
+        displayNumber(i % 10, 126, 0x800000);
+        displayNumber(i % 10, 189, 0x800000);
+        stripClock.show();
+        delay(500);
+        stripClock.clear();
+        displayNumber(i % 10, 0, 0x008000);
+        displayNumber(i % 10, 63, 0x008000);
+        displayNumber(i % 10, 126, 0x008000);
+        displayNumber(i % 10, 189, 0x008000);
+        stripClock.show();
+        delay(500);
+        stripClock.clear();
+        displayNumber(i % 10, 0, 0x000080);
+        displayNumber(i % 10, 63, 0x000080);
+        displayNumber(i % 10, 126, 0x000080);
+        displayNumber(i % 10, 189, 0x000080);
+        stripClock.show();
+        delay(500);
+      }
+      for (int i = 0; i <= LEDCLOCK_COUNT - 2; i++) {
+        stripClock.clear();
+        stripClock.fill(0x808080, i, i / 10 + 1);
+        stripClock.show();
+        delay(30);
+      }
+      clockmode = 0;
+      break;
+
+    default:
+      stripClock.clear();
+      stripDownlighter.setBrightness(Brightness2);
+      stripClock.show();
+      break;
+  }
+
+  // color of the downlighter (0xRRGGBB)
+  stripDownlighter.fill(0x804020, 0, LEDDOWNLIGHT_COUNT);
+  stripDownlighter.show();
+  Serial.println("-----------------------------------");
+  while (wait == dt.second) {
+    dt = clock_.getDateTime();
+
+    char customKey = 0;
+    delay(50);
+    customKey = customKeypad.getKey();
+    if (customKey == 'A' || customKey == 'B' || customKey == 'C') {
+      Serial.print("Key pressed: ");
+      Serial.println(customKey);
+      if (customKey == 'A') {
+        Serial.print("Mode");
+        stripClock.clear();
+        displayNumber(5, 189, clockHourColour);    //S
+        displayNumber(14, 126, clockHourColour);   //E
+        displayNumber(15, 63, clockHourColour);    //T
+        stripClock.show();
+        while (1) {
+          customKey = customKeypad.getKey();
+          switch (customKey) {
+            case '1':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              clockmode = 0;
+              return;
+            case '2':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              clockmode = 1;
+              return;
+            case '3':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              clockmode = 2;
+              return;
+            case 'D': return;
+          }
+        }
+      }
+
+      if (customKey == 'B') {
+        Serial.print("Brightness");
+        bool next = 0;
+        Serial.print("Brightness (Display): ");
+        Serial.println(Brightness1);
+        Serial.print("Brightness (Downlighter): ");
+        Serial.println(Brightness2);
+        while (1) {
+          customKey = customKeypad.getKey();
+          switch (customKey) {
+            case '*':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              (next == 0) ? ( (Brightness1 < 255) ? (Brightness1 += 5) : (1) ) : ((Brightness2 < 255) ? (Brightness2 += 5) : (1));
+              Serial.print("Brightness (Dispay): ");
+              Serial.println(Brightness1);
+              Serial.print("Brightness (Downlighter): ");
+              Serial.println(Brightness2);
+              break;
+            case '#':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              (next == 0) ? ( (Brightness1 > 5) ? (Brightness1 -= 5) : (1) ) : ((Brightness2 > 5) ? (Brightness2 -= 5) : (1));
+              Serial.print("Brightness (Dispay): ");
+              Serial.println(Brightness1);
+              Serial.print("Brightness (Downlighter): ");
+              Serial.println(Brightness2);
+              break;
+            case '0':
+              Serial.print("Key pressed: ");
+              Serial.println(customKey);
+              (next == 0) ? (next = 1) : (1);
+              break;
+            case 'D': return;
+          }
+          customKey = 0;
+          displayNumber(12, 189, 0x808080);
+          if (next == 0) {
+            stripClock.clear();
+            displayNumber(Brightness1 % 10, 0, clockMinuteColour);
+            displayNumber((Brightness1 % 100 - Brightness1 % 10) / 10, 63, clockMinuteColour);
+            displayNumber((Brightness1 >= 200) ? (2) : ((Brightness1 >= 100) ? (1) : (0)), 126, clockHourColour);
+            displayNumber(12, 189, 0x808080);
+            stripClock.setBrightness(Brightness1);
+            stripClock.show();
+          }
+          else {
+            stripClock.clear();
+            displayNumber(Brightness2 % 10, 0, 0x808080);
+            displayNumber((Brightness2 % 100 - Brightness2 % 10) / 10, 63, clockMinuteColour);
+            displayNumber((Brightness2 >= 200) ? (2) : ((Brightness2 >= 100) ? (1) : (0)), 126, clockHourColour);
+            stripDownlighter.setBrightness(Brightness2);
+            stripClock.show();
+            stripDownlighter.show();
+          }
+        }
+      }
+
+      if (customKey == 'C') {
+        Serial.print("Colour");
+        while (1) {
+          stripClock.clear();
+          displayNumber(8, 0, clockMinuteColour);
+          displayNumber(8, 63, clockMinuteColour);
+          displayNumber(8, 126, clockHourColour);
+          displayNumber(8, 189, clockHourColour);
+          stripClock.show();
+          customKey = customKeypad.getKey();
+          switch (customKey) {
+            case '1': (clockMinuteColour < 0x800000) ? (clockMinuteColour += 0x050000) : (1); break;      //R (minutes)
+            case '4': (clockMinuteColour > 0x058080) ? (clockMinuteColour -= 0x050000) : (1); break;
+
+            case '2': (clockMinuteColour % (65536) < 0x8000) ? (clockMinuteColour += 0x0500) : (1); break; //G (minutes)
+            case '5': (clockMinuteColour % (65536) > 0x0580) ? (clockMinuteColour -= 0x0500) : (1); break;
+
+            case '3': (clockMinuteColour % (256) < 0x80) ? (clockMinuteColour += 5) : (1); break;         //G (minutes)
+            case '6': (clockMinuteColour % (256) > 5) ? (clockMinuteColour -= 5) : (1); break;
+
+            case '7': (clockHourColour < 0x800000) ? (clockHourColour += 0x050000) : (1); break;        //R (minutes)
+            case '*': (clockHourColour > 0x058080) ? (clockHourColour -= 0x050000) : (1); break;
+
+            case '8': (clockHourColour % (65536) < 0x8000) ? (clockHourColour += 0x0500) : (1); break;  //G (minutes)
+            case '0': (clockHourColour % (65536) > 0x0580) ? (clockHourColour -= 0x0500) : (1); break;
+
+            case '9': (clockHourColour % (256) < 0x80) ? (clockHourColour += 5) : (1); break;           //G (minutes)
+            case '#': (clockHourColour % (256) > 5) ? (clockHourColour -= 5) : (1); break;
+
+            case 'A': clockHourColour = clockMinuteColour; break;                                   //synchronize colour of minutes and hours
+            case 'B': clockHourColour = 0x808080; clockMinuteColour = 0x808080; break;              //set white
+
+            case 'D': return;
+          }
+        }
+      }
+
+      if (customKey == 'D') {
+        return;
+      }
+    }
+  }
+}
