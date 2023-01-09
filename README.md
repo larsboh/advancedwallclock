@@ -1,7 +1,5 @@
 # advancedwallclock
 
-ITS A BETA - THE FULL WORKING VERSION WILL BE RELEASED AT 9th JANUARY!
-
 A heavily modified version of DIY Machines' code for his awesome wall shelf clock project.
 
 Please read through!
